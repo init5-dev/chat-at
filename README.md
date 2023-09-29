@@ -1,0 +1,1 @@
+Aplicación simple de escritorio para chatear con GPT basado en la librería atengine. ¡Chatea sin tener que abrir el navegador!
