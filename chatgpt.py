@@ -18,13 +18,13 @@ apikey_file = "./api.key"
 
 class Sumarize(QThread):
 	summary = pyqtSignal(str)
-	error = pyqtSignal(str)
+	error = pyqtSignal(Exception)
 
 	def __init__(self, parent):
 		super(Sumarize, self).__init__(parent)
 		self.parent = parent
 
-	@pyqtSlot(str)
+	#@pyqtSlot(str)
 	def run(self):
 		while self.parent.isVisible():
 			chat = self.parent.chatBox.toPlainText()
@@ -46,7 +46,7 @@ class Sumarize(QThread):
 			try:
 				answer = atc.answer(command)
 			except Exception as e:
-				self.error.emit(str(e))
+				self.error.emit(e)
 				self.summary.emit('')
 				return
 
@@ -63,10 +63,9 @@ class ChatGPT(QWidget):
 		super(ChatGPT, self).__init__(parent)
 
 		self.mistery = 'ep-k9CZ0JPRWKgiz1xil0jZNkls5SIuR87XgNN6ZuN4=' #clave para guardar y leer la API key de OpenAI
-		self.apikey =  self.getAPIKey()
+		self.apikey = ''
 
 		self.configureWindow()
-		self.createAttributes()
 		self.createLayout()
 		self.createMenuBar() #desactivado hasta que implemente las funciones
 		self.createChatBox()
@@ -79,6 +78,9 @@ class ChatGPT(QWidget):
 
 		self.chatBox.insertHtml('<b style="color:#3EB489">[%s] AT:</b> ¡Hola!<br>' % self.currTime())
 
+	def resizeEvent(self, e):
+		self.createAttributes()
+	
 	def showEvent(self, e):
 		self.startSummarizer()
 
@@ -87,10 +89,9 @@ class ChatGPT(QWidget):
 		self.setWindowIcon(QIcon('muelagpt.png'))
 
 	def createAttributes(self):
+		self.apikey = self.getAPIKey()
 		self.chatbot = AtChat(self.apikey)
 		self.loadModel()
-		#self.chatbot.setModel(self.loadModel())
-		#print('Ejecutándose con %s.' % self.chatbot.model)
 		self.answer = ''
 		self.dots = -1
 		self.cancelled = False
@@ -118,6 +119,7 @@ class ChatGPT(QWidget):
 		
 		gpt4Action = QAction(QIcon(), 'Usar GPT-4', self, checkable = True)
 		gpt4Action.triggered.connect(self.useGpt4)
+
 		if self.loadConf()['model'] == 'gpt-4':
 			gpt4Action.setChecked(True)
 
@@ -163,10 +165,10 @@ class ChatGPT(QWidget):
 	def startSummarizer(self):
 		self.sumarizer = Sumarize(self)
 		self.sumarizer.summary[str].connect(self.setSummary)
-		self.sumarizer.error[str].connect(self.errorActions)
+		self.sumarizer.error[Exception].connect(lambda: self.setSummary('Chat sin nombre'))
 		self.sumarizer.start()
 
-	def setSummary(self,summary):
+	def setSummary(self, summary):
 		if len(summary):
 			self.summary = summary
 
@@ -247,9 +249,10 @@ class ChatGPT(QWidget):
 		apikey, ok = QInputDialog.getText(self, 'Clave de la API', 'Escribe o pega tu clave de la API de OpenAI.')
 
 		if ok:
+			print(apikey)
 
 			if not len(apikey.strip()):
-				self.infoMessage('¡Introduce la clave!')
+				QMessageBox.critical(self, 'Error', '¡Introduce la clave!')
 				return self.setAPIkey()
 
 			secret.write_file(self.mistery, apikey_file, apikey.strip())
@@ -259,14 +262,17 @@ class ChatGPT(QWidget):
 			if self.testAPIKey():
 				QMessageBox.information(self, 'Clave de la API', '¡La clave fue instalada correctamente!')
 			else:
-				QMessageBox.critical(self, 'Clave de la API','Lo siento, la clave es incorrecta.')
+				QMessageBox.critical(self, 'Clave de la API','Lo siento, la clave es incorrecta.')			
+		else:
+			if not len(apikey.strip()):
+				QMessageBox.warning(self, 'Advertencia', 'Si no introduces tu clave de la API de Open AI, ¡no puedes usar el chat!')
 
-	def getAPIKey(self, first=False):
+	def getAPIKey(self, firstUse=True):
 		try:
 			return secret.read_file(self.mistery, apikey_file)
 		except:
-			if first:
-				QMessageBox.information(self, 'Clave de la API', 'Por favor, inserta la clave de la API de OpenAI para empezar a usar Chat AT.')
+			if not os.path.exists(apikey_file):
+				self.setAPIkey()
 			else:
 				QMessageBox.critical(self, 'Clave de la API', 'Problema al leer la clave de la API. Contacta con el desarrollador.')
 			return ''
@@ -279,7 +285,7 @@ class ChatGPT(QWidget):
 					temperature = 0,
 					top_p = 0,
 				)
-		except openai.error.AuthenticationError:
+		except AuthenticationError as e:
 			return False
 
 		return True
@@ -321,12 +327,30 @@ class ChatGPT(QWidget):
 		cursor.movePosition(QTextCursor.Down)
 		cursor.select(QTextCursor.LineUnderCursor)
 		cursor.removeSelectedText()
-		#cursor.insertHtml('<b>Yo</b>: ')
 		cursor = self.chatBox.textCursor()
 		cursor.movePosition(QTextCursor.Down)
 		cursor.select(QTextCursor.LineUnderCursor)
 		cursor.removeSelectedText()
-		self.chatBox.insertHtml(' <i style="color:red">[%s] Error de AT: %s</i><br>' % (self.currTime(), e))
+
+		msg = 'Error inesperado'
+
+		if type(e) == openai.error.APIError:
+			msg = "Error de OpenAI. Espera unos minutos e inténtalo de nuevo. Si el problema persiste, contacta con la empresa."
+		elif type(e) == openai.error.Timeout:
+			msg = "Tiempo de espera agotado. Espera unos minutos e inténtalo de nuevo. Si el problema persiste, contacta con la empresa."
+		elif type(e) == openai.error.RateLimitError:
+			msg = "Por favor, asegúrate de que tienes conexión a Internet."
+		elif type(e) == openai.error.InvalidRequestError:
+			msg = "¡Atwood falló! Hay algo mal en el código. Por favor, contacta con el desarrollador usando este email: nelson.ochagavia@gmail.com. Enviale este texto:\n ERROR: openai.error.InvalidRequestError\nARGS = %s\nKWARGS = %s" % (args, kwargs)
+		elif type(e) == openai.error.AuthenticationError:	
+			msg = "API key incorrecta. Busca tu API key en https://platform.openai.com/account/api-keys y regístrala aquí en Atwood."
+		elif type(e) == openai.error.ServiceUnavailableError:
+			msg = "¡El servidor de OpenAI sigue sobrecargado! Inténtalo más tarde. Y, si estás usando la prueba gratuita de GPT, es buena idea adquirir un plan de pago."
+		else:
+			msg = e
+			print(type(e))
+		
+		self.chatBox.insertHtml(' <i style="color:orange">[%s] <b>AT:</b> %s</i><br>' % (self.currTime(), msg))
 
 	def writeAnswer(self):
 		answer = self.answer.replace('<br>', '\n').replace('&nbsp', ' ').replace('```', '') + '\n'
