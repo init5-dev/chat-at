@@ -1,10 +1,12 @@
 __pycache__
-ateditor.py
-atwriter.py
-atwriter-save.py
-redirprint.py
-researcher.py
-test.py
+atengine/__pycache__
+atengine/ateditor.py
+atengine/atwriter.py
+atengine/atwriter-save.py
+atengine/redirprint.py
+atengine/test-rprint.py
+atengine/researcher.py
+atengine/test.py
 chats/*
 Atwood (copia).desktop
 chatgpt.sh
